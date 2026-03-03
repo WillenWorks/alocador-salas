@@ -1,4 +1,4 @@
-// Blueprint Brutalista — tela de login (demo + futura integração Supabase).
+// Blueprint Brutalista — tela de login (demo + Supabase).
 
 import * as React from "react";
 import { useLocation } from "wouter";
@@ -22,9 +22,12 @@ const schema = z.object({
 
 type Values = z.infer<typeof schema>;
 
+type Mode = "entrar" | "criar";
+
 export default function LoginPage() {
-  const { login, user, isDemo } = useAuth();
+  const { login, signup, user, isDemo } = useAuth();
   const [, setLocation] = useLocation();
+  const [mode, setMode] = React.useState<Mode>("entrar");
 
   React.useEffect(() => {
     if (user) setLocation("/app/salas");
@@ -36,8 +39,18 @@ export default function LoginPage() {
   });
 
   const onSubmit = form.handleSubmit(async (values) => {
-    const t = toast.loading("Entrando...");
+    const t = toast.loading(mode === "criar" ? "Criando conta..." : "Entrando...");
     try {
+      if (mode === "criar") {
+        await signup(values.email, values.password);
+        toast.success(
+          "Conta criada. Se o Supabase exigir confirmação de e-mail, confirme e depois entre.",
+          { id: t }
+        );
+        setMode("entrar");
+        return;
+      }
+
       await login(values.email, values.password);
       toast.success("Bem-vindo!", { id: t });
       setLocation("/app/salas");
@@ -54,9 +67,7 @@ export default function LoginPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <CardTitle className="text-2xl">Alocador</CardTitle>
-                <CardDescription>
-                  Salas, turmas, matrículas e alocação automática
-                </CardDescription>
+                <CardDescription>Salas, turmas, matrículas e alocação automática</CardDescription>
               </div>
               {isDemo ? (
                 <Badge variant="secondary" className="border border-border/60">
@@ -68,6 +79,20 @@ export default function LoginPage() {
             </div>
           </CardHeader>
           <CardContent>
+            {!isDemo && (
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">Use seu e-mail/senha do Supabase Auth.</p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setMode((m) => (m === "entrar" ? "criar" : "entrar"))}
+                >
+                  {mode === "entrar" ? "Criar conta" : "Já tenho conta"}
+                </Button>
+              </div>
+            )}
+
             <Form {...form}>
               <form onSubmit={onSubmit} className="space-y-4">
                 <FormField
@@ -75,7 +100,7 @@ export default function LoginPage() {
                   name="email"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Usuário</FormLabel>
+                      <FormLabel>{isDemo ? "Usuário" : "E-mail"}</FormLabel>
                       <FormControl>
                         <Input placeholder={isDemo ? "admin" : "seu.email@instituicao"} {...field} />
                       </FormControl>
@@ -99,12 +124,16 @@ export default function LoginPage() {
                 />
 
                 <Button type="submit" className="w-full">
-                  Entrar
+                  {isDemo ? "Entrar" : mode === "criar" ? "Criar conta" : "Entrar"}
                 </Button>
 
-                {isDemo && (
+                {isDemo ? (
                   <p className="text-xs text-muted-foreground">
                     Demo: use <span className="font-semibold">admin/admin</span>. Os dados ficam no seu navegador.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Dica: a primeira sincronização pode levar alguns segundos (tabela <span className="font-semibold">app_data</span>).
                   </p>
                 )}
               </form>
