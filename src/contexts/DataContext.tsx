@@ -1,10 +1,12 @@
 // Blueprint Brutalista — contexto de dados (local-first + Supabase opcional).
 
+
 import * as React from "react";
 import type { AppData } from "@/lib/storage";
 import { createEmptyData, loadData, saveData } from "@/lib/storage";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase.ts/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+
 
 type DataContextValue = {
   data: AppData;
@@ -13,29 +15,37 @@ type DataContextValue = {
   isSyncing: boolean;
 };
 
+
 const DataContext = React.createContext<DataContextValue | null>(null);
+
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const { user, isDemo } = useAuth();
 
+
   const [data, setData] = React.useState<AppData>(() => (isDemo ? loadData() : createEmptyData()));
   const [isSyncing, setIsSyncing] = React.useState(false);
+
 
   React.useEffect(() => {
     if (isDemo) return;
     const sb = supabase;
     if (!sb) return;
 
+
     if (!user) {
       setData(createEmptyData());
       return;
     }
 
+
     let alive = true;
+
 
     (async () => {
       setIsSyncing(true);
       const empty = createEmptyData();
+
 
       const { data: row, error } = await sb
         .from("app_data")
@@ -43,7 +53,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         .eq("user_id", user.id)
         .maybeSingle();
 
+
       if (!alive) return;
+
 
       if (error) {
         console.error("Falha ao carregar app_data:", error);
@@ -52,6 +64,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+
       if (!row) {
         const { error: insErr } = await sb.from("app_data").insert({ user_id: user.id, data: empty });
         if (insErr) console.error("Falha ao criar app_data:", insErr);
@@ -59,48 +72,3 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         setData(empty);
         setIsSyncing(false);
         return;
-      }
-
-      setData((row.data as AppData) ?? empty);
-      setIsSyncing(false);
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, [isDemo, user?.id]);
-
-  React.useEffect(() => {
-    if (isDemo) {
-      saveData(data);
-      return;
-    }
-
-    const sb = supabase;
-    if (!sb) return;
-    if (!user) return;
-
-    const handle = window.setTimeout(async () => {
-      setIsSyncing(true);
-      const { error } = await sb.from("app_data").upsert({ user_id: user.id, data });
-      if (error) console.error("Falha ao salvar app_data:", error);
-      setIsSyncing(false);
-    }, 500);
-
-    return () => window.clearTimeout(handle);
-  }, [data, isDemo, user?.id]);
-
-  const reset = React.useCallback(() => {
-    setData(createEmptyData());
-  }, []);
-
-  const value = React.useMemo(() => ({ data, setData, reset, isSyncing }), [data, reset, isSyncing]);
-
-  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
-}
-
-export function useData() {
-  const ctx = React.useContext(DataContext);
-  if (!ctx) throw new Error("useData deve ser usado dentro de DataProvider");
-  return ctx;
-}
