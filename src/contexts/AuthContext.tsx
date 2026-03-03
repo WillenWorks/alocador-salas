@@ -1,6 +1,7 @@
-// Blueprint Brutalista — auth simples + modo demo.
+// Blueprint Brutalista — auth simples + Supabase Auth (1 tenant).
 
 import * as React from "react";
+import { hasSupabaseEnv, supabase } from "@/lib/supabase";
 
 export type AppUser = {
   id: string;
@@ -11,50 +12,92 @@ export type AppUser = {
 type AuthContextValue = {
   user: AppUser | null;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  signup: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
   isDemo: boolean;
 };
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
-function hasSupabaseEnv() {
-  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-  return Boolean(url && key);
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const isDemo = !hasSupabaseEnv();
+  const isDemo = !hasSupabaseEnv;
   const [user, setUser] = React.useState<AppUser | null>(() => {
-    const raw = localStorage.getItem("alocador.auth.user");
-    return raw ? (JSON.parse(raw) as AppUser) : null;
+    if (isDemo) {
+      const raw = localStorage.getItem("alocador.auth.user");
+      return raw ? (JSON.parse(raw) as AppUser) : null;
+    }
+    return null;
   });
 
-  const login = React.useCallback(async (email: string, password: string) => {
-    // MVP: modo demo (sem Supabase configurado) com credenciais fixas.
-    if (isDemo) {
-      if (email.toLowerCase() === "admin" && password === "admin") {
-        const u: AppUser = { id: "demo-admin", email: "admin", role: "admin" };
-        setUser(u);
-        localStorage.setItem("alocador.auth.user", JSON.stringify(u));
-        return;
-      }
-      throw new Error("Credenciais inválidas. No modo demo use admin/admin.");
-    }
+  React.useEffect(() => {
+    if (isDemo) return;
+    if (!supabase) return;
 
-    // TODO (fase 2): integrar com Supabase Auth (ou tabela custom) de acordo com a instituição.
-    // Mantemos o contrato para não travar o MVP.
-    throw new Error(
-      "Supabase configurado, mas o fluxo de login ainda não foi ligado. (Fase 2)"
-    );
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      const u = data.session?.user;
+      setUser(u ? { id: u.id, email: u.email ?? "", role: "admin" } : null);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      const u = session?.user;
+      setUser(u ? { id: u.id, email: u.email ?? "", role: "admin" } : null);
+    });
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
   }, [isDemo]);
 
-  const logout = React.useCallback(() => {
-    setUser(null);
-    localStorage.removeItem("alocador.auth.user");
-  }, []);
+  const login = React.useCallback(
+    async (email: string, password: string) => {
+      if (isDemo) {
+        if (email.toLowerCase() === "admin" && password === "admin") {
+          const u: AppUser = { id: "demo-admin", email: "admin", role: "admin" };
+          setUser(u);
+          localStorage.setItem("alocador.auth.user", JSON.stringify(u));
+          return;
+        }
+        throw new Error("Credenciais inválidas. No modo demo use admin/admin.");
+      }
 
-  const value = React.useMemo(() => ({ user, login, logout, isDemo }), [user, login, logout, isDemo]);
+      if (!supabase) throw new Error("Supabase não inicializado (verifique as variáveis VITE_...).");
+
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw new Error(error.message);
+    },
+    [isDemo]
+  );
+
+  const signup = React.useCallback(
+    async (email: string, password: string) => {
+      if (isDemo) throw new Error("No modo demo não existe criação de conta.");
+      if (!supabase) throw new Error("Supabase não inicializado (verifique as variáveis VITE_...).");
+
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) throw new Error(error.message);
+    },
+    [isDemo]
+  );
+
+  const logout = React.useCallback(async () => {
+    if (isDemo) {
+      setUser(null);
+      localStorage.removeItem("alocador.auth.user");
+      return;
+    }
+
+    if (!supabase) return;
+    await supabase.auth.signOut();
+  }, [isDemo]);
+
+  const value = React.useMemo(
+    () => ({ user, login, signup, logout, isDemo }),
+    [user, login, signup, logout, isDemo]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
